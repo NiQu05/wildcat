@@ -24,6 +24,7 @@ import wildcat.CSR._
 import wildcat.Util
 
 class SimRV(mem: Array[Int], start: Int, stop: Int) {
+  import SimRV._
 
   // That's the state of the processor.
   // That's it, nothing else (except memory ;-)
@@ -131,6 +132,24 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
       }
     }
 
+    def mulDiv(funct3: Int, op1: Int, op2: Int): Int = {
+      val a = op1.toLong
+      val b = op2.toLong
+      val au = op1.toLong & 0xFFFFFFFFL
+      val bu = op2.toLong & 0xFFFFFFFFL
+
+      funct3 match {
+        case F3_MUL => ((a * b) & 0xFFFFFFFFL).toInt
+        case F3_MULH => ((a * b) >> 32).toInt
+        case F3_MULHSU => ((a * bu) >> 32).toInt
+        case F3_MULHU => ((au * bu) >> 32).toInt
+        case F3_DIV => if (b == 0) -1 else (a / b).toInt
+        case F3_DIVU => if (bu == 0) -1 else (au / bu).toInt
+        case F3_REM => if (b == 0) a.toInt else (a % b).toInt
+        case F3_REMU => if (bu == 0) au.toInt else (au % bu).toInt
+      }
+    }
+
     def compare(funct3: Int, op1: Int, op2: Int): Boolean = {
       funct3 match {
         case BEQ => op1 == op2
@@ -143,7 +162,7 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
     }
 
     def load(funct3: Int, base: Int, displ: Int): Int = {
-      val addr = ((base + displ) & 0xfffff) // 1 MB wrap around
+      val addr = ((base + displ) & maxAddr)
       val data = mem(addr >>> 2)
       funct3 match {
         case LB => (((data >> (8 * (addr & 0x03))) & 0xff) << 24) >> 24
@@ -155,7 +174,7 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
     }
 
     def store(funct3: Int, base: Int, displ: Int, value: Int): Unit = {
-      val addr = base + displ
+      val addr = (base + displ) & maxAddr
       val wordAddr = addr >>> 2
       
       // Any store should invalidate reservations to the same address
@@ -182,7 +201,7 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
         }
         case SW => {
           // very primitive IO simulation
-          if (addr == 0xf0000004) {
+          if (addr == 0xf0000004 || addr == 0xf0000000) {
             println("out: " + value.toChar)
           } else {
             mem(wordAddr) = value
@@ -195,6 +214,10 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
       funct3 match {
         case ESYS => {
           run = false
+          return 0
+        }
+        case CSRRW => {
+          // println(s"csrrw ${imm & 0xfff} write: ${reg(rs1)}")
           return 0
         }
         case CSRRS => {
@@ -213,6 +236,35 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
           }
           // println(s"csrrw ${imm & 0xfff} return: $v")
           return v
+        }
+        case CSRRC => {
+          // println(s"csrrw ${imm & 0xfff} clear: ${reg(rs1)}")
+          return 0
+        }
+        case CSRRWI => {
+          // println(s"csrrw ${imm & 0xfff} write imm: ${rs1}")
+          return 0
+        }
+        case CSRRSI => {
+          val v = imm & 0xfff match {
+            case CYCLE => instrCnt // cycle
+            case CYCLEH => 0 // cycleh
+            case TIME => instrCnt // time
+            case TIMEH => 0 // timeh
+            case INSTRET => instrCnt // instret
+            case INSTRETH => 0 // instreth
+
+            case HARTID => 0 // hartid
+            case MARCHID => WILDCAT_MARCHID
+
+            case _ => 0 // this gets us around _start in the test cases
+          }
+          // println(s"csrrw ${imm & 0xfff} return: $v")
+          return v
+        }
+        case CSRRCI => {
+          // println(s"csrrw ${imm & 0xfff} clear imm: ${rs1}")
+          return 0
         }
         case _ => {
           println("Unknown ecall: " + funct3)
@@ -295,6 +347,7 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
         (value, success, pcNext)
       }
       case AluImm => (alu(funct3, sraSub, rs1Val, imm), true, pcNext)
+      case Alu if funct7 == 0x01 => (mulDiv(funct3, rs1Val, rs2Val), true, pcNext)
       case Alu => (alu(funct3, sraSub, rs1Val, rs2Val), true, pcNext)
       case Branch => (0, false, if (compare(funct3, rs1Val, rs2Val)) pc + imm else pcNext)
       case Load => (load(funct3, rs1Val, imm), true, pcNext)
@@ -338,8 +391,11 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
 
 object SimRV {
 
+  val memSize = 8 // MB
+  val maxAddr = memSize * 1024 * 1024 - 1
+
   def runSimRV(file: String) = {
-    val mem = new Array[Int](1024 * 256) // 1 MB, also check masking in load and store
+    val mem = new Array[Int](memSize * 1024 * 1024 / 4) // memSize MB as Int array
 
     val (code, start) = Util.getCode(file)
 
