@@ -56,6 +56,25 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
   private var mtval: Int = 0
   private var mip: Int = 0
 
+  def plicHasPending: Boolean = false
+
+  // MOVE TO DEFINES
+  // mstatus bits (RV32)
+  val MSTATUS_MIE = 1 << 3
+  val MSTATUS_MPIE = 1 << 7
+  val MSTATUS_MPP = 3 << 11 // 2 bits; always 0b11 (M-mode) for us
+
+  // mie/mip bits
+  val MIP_MSIP = 1 << 3
+  val MIP_MTIP = 1 << 7
+  val MIP_MEIP = 1 << 11
+
+  // mcause interrupt codes (with MSB=1)
+  val CAUSE_M_TIMER = 0x80000007
+  val CAUSE_M_EXTERNAL = 0x8000000b
+  val CAUSE_M_SOFTWARE = 0x80000003
+  // END OF DEFINES
+
   // halt flag
   var run = true
 
@@ -319,18 +338,23 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
               Console.err.println(
                 f"WARN: ecall at pc=0x$pc%08x (a7=0x${reg(17)}%08x)"
               )
+              takeTrap(cause = 11, epc = pc, tval = 0)
               (0, false, pcNext)
             case 0x001 =>
               // EBREAK — treat as fatal with diagnostic
               Console.err.println(f"EBREAK at pc=0x$pc%08x")
               // run = false
+              takeTrap(cause = 3, epc = pc, tval = pc)
               (0, false, pcNext)
             case 0x105 =>
               // WFI — no-op (we don't deliver interrupts anyway)
               (0, false, pcNext)
             case 0x102 | 0x302 =>
-              // SRET / MRET — no-op (no real trap frame to pop)
-              (0, false, pcNext)
+              val mpie = (mstatus & MSTATUS_MPIE) >>> 4 // bit7 -> bit3
+              mstatus = (mstatus & ~MSTATUS_MIE) | mpie // restore MIE from MPIE
+              mstatus |= MSTATUS_MPIE // set MPIE=1
+              // MPP would be restored to least-privileged (U), but we only have M; leave as-is
+              (0, false, mepc)
             case _ =>
               Console.err.println(
                 f"Unknown SYSTEM f3=0 imm12=0x$imm12%03x at pc=0x$pc%08x — treating as nop"
@@ -499,32 +523,73 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
     pc != oldPc && run && pc < stop
   }
 
+  // Trap Handler
+  def updateMip(): Unit = {
+    // Timer: set MTIP whenever mtime >= mtimecmp
+    if (instCount >= mtimecmp) mip |= MIP_MTIP else mip &= ~MIP_MTIP
+    // External: set MEIP whenever any PLIC source is pending+enabled
+    if (plicHasPending) mip |= MIP_MEIP else mip &= ~MIP_MEIP
+    // MSIP from CLINT msip reg (you currently ignore writes to it — fine for now)
+  }
+
+  def pendingInterruptCause(): Option[Int] = {
+    if ((mstatus & MSTATUS_MIE) == 0) return None
+    val active = mip & mie
+    if ((active & MIP_MEIP) != 0) Some(CAUSE_M_EXTERNAL)
+    else if ((active & MIP_MSIP) != 0) Some(CAUSE_M_SOFTWARE)
+    else if ((active & MIP_MTIP) != 0) Some(CAUSE_M_TIMER)
+    else None
+  }
+
+  def takeTrap(cause: Int, epc: Int, tval: Int): Unit = {
+    mepc = epc
+    mcause = cause
+    mtval = tval
+    // Save MIE into MPIE, clear MIE, set MPP=11 (M-mode)
+    val mpie = (mstatus & MSTATUS_MIE) << 4 // bit3 -> bit7
+    mstatus =
+      (mstatus & ~(MSTATUS_MIE | MSTATUS_MPIE | MSTATUS_MPP)) | mpie | MSTATUS_MPP
+    // Vectored mode if mtvec[1:0]==1 and it's an interrupt; otherwise direct.
+    val base = mtvec & ~0x3
+    val mode = mtvec & 0x3
+    pc =
+      if (mode == 1 && (cause & 0x80000000) != 0)
+        base + 4 * (cause & 0x7fffffff)
+      else base
+  }
+
   // -------------------------------------------------------------------------
   // Main execution loop with exception catching so problems are visible.
   // -------------------------------------------------------------------------
   var cont = true
   var steps: Long = 0L
   while (cont) {
-    try {
-      val instr = mem(memIdx(pc))
-      cont = execute(instr)
-      instCount += 1
-      steps += 1
-    } catch {
-      case e: Throwable =>
-        Console.err.println(
-          f"\n*** SIM HALTED at pc=0x$pc%08x after $steps steps"
-        )
-        Console.err.println(
-          s"***   reason: ${e.getClass.getSimpleName}: ${e.getMessage}"
-        )
-        Console.err.println("***   registers:")
-        for (i <- 0 until 32) {
-          Console.err.print(f"x$i%02d=0x${reg(i)}%08x ")
-          if ((i & 3) == 3) Console.err.println()
+    updateMip() // update pending interrupts before each instruction
+    pendingInterruptCause() match {
+      case Some(c) => takeTrap(c, pc, 0) // tval = 0 for interrupts
+      case None    =>
+        try {
+          val instr = mem(memIdx(pc))
+          cont = execute(instr)
+          instCount += 1
+          steps += 1
+        } catch {
+          case e: Throwable =>
+            Console.err.println(
+              f"\n*** SIM HALTED at pc=0x$pc%08x after $steps steps"
+            )
+            Console.err.println(
+              s"***   reason: ${e.getClass.getSimpleName}: ${e.getMessage}"
+            )
+            Console.err.println("***   registers:")
+            for (i <- 0 until 32) {
+              Console.err.print(f"x$i%02d=0x${reg(i)}%08x ")
+              if ((i & 3) == 3) Console.err.println()
+            }
+            cont = false
         }
-        cont = false
     }
+
   }
   Console.err.println(f"Simulation ended. pc=0x$pc%08x, steps=$steps")
 }
