@@ -57,6 +57,7 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
   private var mip: Int = 0
 
   def plicHasPending: Boolean = false
+  private var currentPriv: Int = 3 // 3 = M-mode at reset
 
   // MOVE TO DEFINES
   // mstatus bits (RV32)
@@ -126,6 +127,7 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
   }
 
   def execute(instr: Int): Boolean = {
+    val oldPc = pc
 
     val opcode = instr & 0x7f
     val rd = (instr >> 7) & 0x01f
@@ -335,25 +337,25 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
             case 0x000 =>
               // ECALL. Linux nommu without SBI shouldn't execute these.
               // Log and continue instead of halting.
-              Console.err.println(
-                f"WARN: ecall at pc=0x$pc%08x (a7=0x${reg(17)}%08x)"
-              )
-              takeTrap(cause = 11, epc = pc, tval = 0)
-              (0, false, pcNext)
+              // Console.err.println(f"ECALL at pc=0x$pc%08x")
+              val fromM = ((mstatus >>> 11) & 0x3) == 3
+              val cause = if (currentPriv == 3) 11 else 8
+              takeTrap(cause, pc, 0)
+              (0, false, pc) // takeTrap set pc = mtvec base
             case 0x001 =>
               // EBREAK — treat as fatal with diagnostic
-              Console.err.println(f"EBREAK at pc=0x$pc%08x")
-              // run = false
+              // Console.err.println(f"EBREAK at pc=0x$pc%08x")
               takeTrap(cause = 3, epc = pc, tval = pc)
-              (0, false, pcNext)
+              (0, false, pc)
             case 0x105 =>
               // WFI — no-op (we don't deliver interrupts anyway)
               (0, false, pcNext)
             case 0x102 | 0x302 =>
-              val mpie = (mstatus & MSTATUS_MPIE) >>> 4 // bit7 -> bit3
-              mstatus = (mstatus & ~MSTATUS_MIE) | mpie // restore MIE from MPIE
-              mstatus |= MSTATUS_MPIE // set MPIE=1
-              // MPP would be restored to least-privileged (U), but we only have M; leave as-is
+              val mpie = (mstatus & MSTATUS_MPIE) >>> 4 // bit 7 -> bit 3
+              mstatus = (mstatus & ~MSTATUS_MIE) | mpie // MIE <- MPIE
+              mstatus |= MSTATUS_MPIE // MPIE <- 1
+              currentPriv = (mstatus >>> 11) & 0x3 // priv <- MPP
+              // Spec also says set MPP <- U (least privileged); harmless to leave for now.
               (0, false, mepc)
             case _ =>
               Console.err.println(
@@ -512,7 +514,6 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
 
     if (rd != 0 && result._2) reg(rd) = result._1
 
-    val oldPc = pc
     pc = result._3
 
     // Keep running while:
@@ -545,11 +546,12 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
     mepc = epc
     mcause = cause
     mtval = tval
-    // Save MIE into MPIE, clear MIE, set MPP=11 (M-mode)
-    val mpie = (mstatus & MSTATUS_MIE) << 4 // bit3 -> bit7
+    // Save current privilege into MPP, save MIE into MPIE, clear MIE.
+    val mpie = (mstatus & MSTATUS_MIE) << 4 // bit 3 -> bit 7
+    val mpp = currentPriv << 11 // 0 = U, 3 = M
     mstatus =
-      (mstatus & ~(MSTATUS_MIE | MSTATUS_MPIE | MSTATUS_MPP)) | mpie | MSTATUS_MPP
-    // Vectored mode if mtvec[1:0]==1 and it's an interrupt; otherwise direct.
+      (mstatus & ~(MSTATUS_MIE | MSTATUS_MPIE | MSTATUS_MPP)) | mpie | mpp
+    currentPriv = 3 // trap always enters M
     val base = mtvec & ~0x3
     val mode = mtvec & 0x3
     pc =
@@ -600,7 +602,7 @@ object SimRV {
   // the `. = 0x80000000;` in boot.ld and the memory@80000000 node in wildcat.dts.
   val MEM_BASE = 0x80000000
 
-  val memSize = 16 // MB
+  val memSize = 32 // MB
   val memWords = memSize * 1024 * 1024 / 4
   val maxAddr = memSize * 1024 * 1024 - 1
 
