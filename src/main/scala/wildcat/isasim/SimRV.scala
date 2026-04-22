@@ -35,17 +35,17 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
   import SimRV._
 
   // Processor state
-  var pc = start
+  var pc  = start
   var reg = new Array[Int](32)
   reg(0) = 0
 
   // LR/SC reservation
   var reservationValid = false
-  var reservationAddr = 0
+  var reservationAddr  = 0
 
   // CLINT timer state
   private var instCount: Long = 0L
-  private var mtimecmp: Long = Long.MaxValue // no pending timer by default
+  private var mtimecmp: Long  = Long.MaxValue   // no pending timer by default
 
   // halt flag
   var run = true
@@ -65,22 +65,19 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
   }
 
   // MMIO region predicates
-  @inline private def isUart(addr: Int): Boolean =
-    addr >= 0x10000000 && addr < 0x10000100
-  @inline private def isClint(addr: Int): Boolean =
-    addr >= 0x02000000 && addr < 0x02010000
-  @inline private def isPlic(addr: Int): Boolean =
-    addr >= 0x0c000000 && addr < 0x10000000
+  @inline private def isUart(addr: Int):  Boolean = addr >= 0x10000000 && addr < 0x10000100
+  @inline private def isClint(addr: Int): Boolean = addr >= 0x02000000 && addr < 0x02010000
+  @inline private def isPlic(addr: Int):  Boolean = addr >= 0x0c000000 && addr < 0x10000000
 
   // CLINT load
   private def clintLoad(addr: Int): Int = {
     val off = addr - 0x02000000
     off match {
-      case 0xbff8 => (instCount & 0xffffffffL).toInt // mtime lo
-      case 0xbffc => ((instCount >>> 32) & 0xffffffffL).toInt // mtime hi
-      case 0x4000 => (mtimecmp & 0xffffffffL).toInt // mtimecmp lo
-      case 0x4004 => ((mtimecmp >>> 32) & 0xffffffffL).toInt // mtimecmp hi
-      case 0x0000 => 0 // msip (hart 0)
+      case 0xbff8 =>  (instCount         & 0xffffffffL).toInt      // mtime lo
+      case 0xbffc => ((instCount >>> 32) & 0xffffffffL).toInt      // mtime hi
+      case 0x4000 =>  (mtimecmp          & 0xffffffffL).toInt      // mtimecmp lo
+      case 0x4004 => ((mtimecmp  >>> 32) & 0xffffffffL).toInt      // mtimecmp hi
+      case 0x0000 => 0                                             // msip (hart 0)
       case _      => 0
     }
   }
@@ -90,41 +87,19 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
     val off = addr - 0x02000000
     off match {
       case 0x4000 =>
-        mtimecmp =
-          (mtimecmp & 0xffffffff00000000L) | (value.toLong & 0xffffffffL)
+        mtimecmp = (mtimecmp & 0xffffffff00000000L) | (value.toLong & 0xffffffffL)
       case 0x4004 =>
-        mtimecmp =
-          (mtimecmp & 0x00000000ffffffffL) | ((value.toLong & 0xffffffffL) << 32)
-      case _ => () // msip + everything else: ignore
+        mtimecmp = (mtimecmp & 0x00000000ffffffffL) | ((value.toLong & 0xffffffffL) << 32)
+      case _ => ()   // msip + everything else: ignore
     }
   }
 
-  private val csrs = scala.collection.mutable.HashMap[Int, Int](
-    0x300 -> 0x00001800, // mstatus: MPP = M-mode, MIE = 0
-    0x301 -> 0x40001100, // misa:    RV32IMA
-    0x304 -> 0, // mie
-    0x305 -> 0, // mtvec
-    0x340 -> 0, // mscratch
-    0x341 -> 0, // mepc
-    0x342 -> 0, // mcause
-    0x343 -> 0, // mtval
-    0x344 -> 0, // mip
-    0xf11 -> 0, // mvendorid
-    0xf12 -> WILDCAT_MARCHID, // marchid
-    0xf13 -> 0, // mimpid
-    0xf14 -> 0 // mhartid
-  )
-  private val readOnlyCsrs = Set(0x301, 0xf11, 0xf12, 0xf13, 0xf14)
-
-  private def csrRead(addr: Int): Int = csrs.getOrElse(addr, 0)
-  private def csrWrite(addr: Int, value: Int): Unit =
-    if (!readOnlyCsrs.contains(addr)) csrs(addr) = value
-
   def execute(instr: Int): Boolean = {
+
     val opcode = instr & 0x7f
-    val rd = (instr >> 7) & 0x01f
-    val rs1 = (instr >> 15) & 0x01f
-    val rs2 = (instr >> 20) & 0x01f
+    val rd     = (instr >> 7)  & 0x01f
+    val rs1    = (instr >> 15) & 0x01f
+    val rs2    = (instr >> 20) & 0x01f
     val funct3 = (instr >> 12) & 0x07
     val funct7 = (instr >> 25) & 0x07f
 
@@ -142,16 +117,16 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
         case System => I
         case _      => R
       }
-      val instr7 = (instr >> 7) & 0x01
-      val instr11_8 = (instr >> 8) & 0x0f
+      val instr7     = (instr >> 7)  & 0x01
+      val instr11_8  = (instr >> 8)  & 0x0f
       val instr19_12 = (instr >> 12) & 0xff
-      val instr20 = (instr >> 20) & 0x01
+      val instr20    = (instr >> 20) & 0x01
       val instr24_21 = (instr >> 21) & 0x0f
       val instr31_20 = (instr >> 20) & 0xfff
       val instr30_25 = (instr >> 25) & 0x3f
-      val instr31 = (instr >> 31) & 0x01
-      val sext8 = if (instr31 == 1) 0xff else 0
-      val sext12 = if (instr31 == 1) 0xfff else 0
+      val instr31    = (instr >> 31) & 0x01
+      val sext8      = if (instr31 == 1) 0xff  else 0
+      val sext12     = if (instr31 == 1) 0xfff else 0
 
       val imm0 = instrType match {
         case I => instr20
@@ -164,15 +139,14 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
         case UJ => instr24_21
         case _  => instr11_8
       }
-      val imm10_5 = if (instrType == U) 0 else instr30_25
+      val imm10_5  = if (instrType == U) 0 else instr30_25
       val imm11 = instrType match {
         case SBT => instr7
         case U   => 0
         case UJ  => instr20
         case _   => instr31
       }
-      val imm19_12 =
-        if (instrType == U || instrType == UJ) instr19_12 else sext8
+      val imm19_12 = if (instrType == U || instrType == UJ) instr19_12 else sext8
       val imm31_20 = if (instrType == U) instr31_20 else sext12
 
       (imm31_20 << 20) | (imm19_12 << 12) | (imm11 << 11) |
@@ -199,8 +173,8 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
     }
 
     def mulDiv(funct3: Int, op1: Int, op2: Int): Int = {
-      val a = op1.toLong
-      val b = op2.toLong
+      val a  = op1.toLong
+      val b  = op2.toLong
       val au = op1.toLong & 0xffffffffL
       val bu = op2.toLong & 0xffffffffL
       funct3 match {
@@ -208,18 +182,18 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
         case F3_MULH   => ((a * b) >> 32).toInt
         case F3_MULHSU => ((a * bu) >> 32).toInt
         case F3_MULHU  => ((au * bu) >> 32).toInt
-        case F3_DIV    => if (b == 0) -1 else (a / b).toInt
+        case F3_DIV    => if (b  == 0) -1 else (a  / b ).toInt
         case F3_DIVU   => if (bu == 0) -1 else (au / bu).toInt
-        case F3_REM    => if (b == 0) a.toInt else (a % b).toInt
+        case F3_REM    => if (b  == 0) a.toInt  else (a  % b ).toInt
         case F3_REMU   => if (bu == 0) au.toInt else (au % bu).toInt
       }
     }
 
     def compare(funct3: Int, op1: Int, op2: Int): Boolean = funct3 match {
-      case BEQ  => op1 == op2
+      case BEQ  =>   op1 == op2
       case BNE  => !(op1 == op2)
-      case BLT  => op1 < op2
-      case BGE  => op1 >= op2
+      case BLT  =>   op1 <  op2
+      case BGE  =>   op1 >= op2
       case BLTU => (op1 < op2) ^ (op1 < 0) ^ (op2 < 0)
       case BGEU => op1 == op2 || ((op1 > op2) ^ (op1 < 0) ^ (op2 < 0))
     }
@@ -231,7 +205,7 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
       if (isUart(addr)) {
         val offset = addr - 0x10000000
         return offset match {
-          case 5 => 0x60 // LSR: THRE | TEMT  (transmit always ready)
+          case 5 => 0x60     // LSR: THRE | TEMT  (transmit always ready)
           case _ => 0x00
         }
       }
@@ -245,11 +219,11 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
       // RAM
       val data = mem(memIdx(addr))
       funct3 match {
-        case LB  => (((data >> (8 * (addr & 0x03))) & 0xff) << 24) >> 24
+        case LB  => (((data >> (8 * (addr & 0x03))) & 0xff)   << 24) >> 24
         case LH  => (((data >> (8 * (addr & 0x03))) & 0xffff) << 16) >> 16
         case LW  => data
-        case LBU => (data >> (8 * (addr & 0x03))) & 0xff
-        case LHU => (data >> (8 * (addr & 0x03))) & 0xffff
+        case LBU =>  (data >> (8 * (addr & 0x03))) & 0xff
+        case LHU =>  (data >> (8 * (addr & 0x03))) & 0xffff
       }
     }
 
@@ -264,7 +238,7 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
             print((value & 0xff).toChar)
             Console.out.flush()
           case _ =>
-          // writes to IER/FCR/LCR/MCR/SCR — no-op
+            // writes to IER/FCR/LCR/MCR/SCR — no-op
         }
         return
       }
@@ -278,9 +252,7 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
       // RAM
       val wordAddr = memIdx(addr)
 
-      if (
-        reservationValid && wordAddr == (reservationAddr >>> 2) - (MEM_BASE >>> 2)
-      ) {
+      if (reservationValid && wordAddr == (reservationAddr >>> 2) - (MEM_BASE >>> 2)) {
         // Conservative: any store in RAM invalidates a matching reservation.
         reservationValid = false
       }
@@ -293,19 +265,14 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
             case 2 => 0xff00ffff
             case 3 => 0x00ffffff
           }
-          mem(wordAddr) =
-            (mem(wordAddr) & mask) | ((value & 0xff) << (8 * (addr & 0x03)))
+          mem(wordAddr) = (mem(wordAddr) & mask) | ((value & 0xff) << (8 * (addr & 0x03)))
         case SH =>
           val mask = (addr & 0x03) match {
             case 0 => 0xffff0000
             case 2 => 0x0000ffff
-            case o =>
-              throw new RuntimeException(
-                f"Misaligned SH at 0x$addr%08x (off=$o)"
-              )
+            case o => throw new RuntimeException(f"Misaligned SH at 0x$addr%08x (off=$o)")
           }
-          mem(wordAddr) =
-            (mem(wordAddr) & mask) | ((value & 0xffff) << (8 * (addr & 0x03)))
+          mem(wordAddr) = (mem(wordAddr) & mask) | ((value & 0xffff) << (8 * (addr & 0x03)))
         case SW =>
           mem(wordAddr) = value
       }
@@ -315,83 +282,47 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
     def systemOp(): (Int, Boolean, Int) = {
       val pcNext = pc + 4
       if (funct3 == 0) {
-        val f7 = (instr >>> 25) & 0x7f
+        val f7    = (instr >>> 25) & 0x7f
         val imm12 = (instr >>> 20) & 0xfff
         if (f7 == 0x09 || f7 == 0x0b) {
           // sfence.vma / sinval.vma: no-op (no MMU)
           (0, false, pcNext)
-        } else
-          imm12 match {
-            case 0x000 =>
-              // ECALL. Linux nommu without SBI shouldn't execute these.
-              // Log and continue instead of halting.
-              Console.err.println(
-                f"WARN: ecall at pc=0x$pc%08x (a7=0x${reg(17)}%08x)"
-              )
-              (0, false, pcNext)
-            case 0x001 => // EBREAK  — real trap into mtvec if set
-              val tvec = csrRead(0x305)
-              if ((tvec & ~0x3) != 0) {
-                csrWrite(0x341, pc) // mepc  = offending pc
-                csrWrite(0x342, 3) // mcause = breakpoint
-                val s = csrRead(0x300)
-                val mie = (s >>> 3) & 1
-                csrWrite(0x300, (s & ~0x88) | (mie << 7)) // MPIE = MIE; MIE = 0
-                (0, false, tvec & ~0x3)
-              } else {
-                Console.err.println(
-                  f"EBREAK at pc=0x$pc%08x (no mtvec installed)"
-                )
-                run = false
-                (0, false, pcNext)
-              }
-            case 0x102 | 0x302 => // SRET / MRET — return from trap
-              val epc = csrRead(0x341) // use mepc (nommu = M-mode)
-              val s = csrRead(0x300)
-              val mpie = (s >>> 7) & 1
-              csrWrite(
-                0x300,
-                (s & ~0x8) | (mpie << 3) | 0x80
-              ) // MIE = MPIE; MPIE = 1
-              (0, false, epc)
-            case 0x105 =>
-              // WFI — no-op (we don't deliver interrupts anyway)
-              (0, false, pcNext)
-            case _ =>
-              Console.err.println(
-                f"Unknown SYSTEM f3=0 imm12=0x$imm12%03x at pc=0x$pc%08x — treating as nop"
-              )
-              (0, false, pcNext)
-          }
+        } else imm12 match {
+          case 0x000 =>
+            // ECALL. Linux nommu without SBI shouldn't execute these.
+            // Log and continue instead of halting.
+            Console.err.println(f"WARN: ecall at pc=0x$pc%08x (a7=0x${reg(17)}%08x)")
+            (0, false, pcNext)
+          case 0x001 =>
+            // EBREAK — treat as fatal with diagnostic
+            Console.err.println(f"EBREAK at pc=0x$pc%08x")
+            run = false
+            (0, false, pcNext)
+          case 0x105 =>
+            // WFI — no-op (we don't deliver interrupts anyway)
+            (0, false, pcNext)
+          case 0x102 | 0x302 =>
+            // SRET / MRET — no-op (no real trap frame to pop)
+            (0, false, pcNext)
+          case _ =>
+            Console.err.println(f"Unknown SYSTEM f3=0 imm12=0x$imm12%03x at pc=0x$pc%08x — treating as nop")
+            (0, false, pcNext)
+        }
       } else {
         // CSR read/write — return 0 / MARCHID, silently accept writes
         (csrOp(), true, pcNext)
       }
     }
 
-    def csrOp(): Int = {
-      val csr = imm & 0xfff
-      val old = csrRead(csr)
-      val src = funct3 match {
-        case CSRRW | CSRRS | CSRRC    => reg(rs1)
-        case CSRRWI | CSRRSI | CSRRCI => rs1 // 5-bit zimm lives in rs1 slot
-        case _                        => 0
-      }
-      // For Set/Clear, skip the write if source is x0/zimm0 (spec requirement)
-      val doWrite = funct3 match {
-        case CSRRW | CSRRWI                  => true
-        case CSRRS | CSRRSI | CSRRC | CSRRCI => rs1 != 0
-        case _                               => false
-      }
-      if (doWrite) {
-        val nw = funct3 match {
-          case CSRRW | CSRRWI => src
-          case CSRRS | CSRRSI => old | src
-          case CSRRC | CSRRCI => old & ~src
+    def csrOp(): Int = funct3 match {
+      case CSRRW | CSRRC | CSRRWI | CSRRCI => 0
+      case CSRRS | CSRRSI =>
+        (imm & 0xfff) match {
+          case HARTID  => 0
+          case MARCHID => WILDCAT_MARCHID
+          case _       => 0
         }
-        csrWrite(csr, nw)
-      }
-      old
+      case _ => 0
     }
 
     def atomic(funct5: Int, addr: Int, rs2Val: Int): (Int, Boolean) = {
@@ -402,44 +333,42 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
       val oldValue = mem(wordAddr)
 
       funct5 match {
-        case 0x02 => // LR.W
+        case 0x02 =>   // LR.W
           reservationValid = true
-          reservationAddr = addr
+          reservationAddr  = addr
           (oldValue, true)
-        case 0x03 => // SC.W
+        case 0x03 =>   // SC.W
           if (reservationValid && reservationAddr == addr) {
             mem(wordAddr) = rs2Val
             reservationValid = false
             (0, true)
           } else (1, true)
-        case 0x01 => // AMOSWAP
+        case 0x01 =>   // AMOSWAP
           mem(wordAddr) = rs2Val; (oldValue, true)
-        case 0x00 => // AMOADD
+        case 0x00 =>   // AMOADD
           mem(wordAddr) = oldValue + rs2Val; (oldValue, true)
-        case 0x04 => // AMOXOR
+        case 0x04 =>   // AMOXOR
           mem(wordAddr) = oldValue ^ rs2Val; (oldValue, true)
-        case 0x0c => // AMOAND
+        case 0x0c =>   // AMOAND
           mem(wordAddr) = oldValue & rs2Val; (oldValue, true)
-        case 0x08 => // AMOOR
+        case 0x08 =>   // AMOOR
           mem(wordAddr) = oldValue | rs2Val; (oldValue, true)
-        case 0x10 => // AMOMIN
+        case 0x10 =>   // AMOMIN
           mem(wordAddr) = math.min(oldValue, rs2Val); (oldValue, true)
-        case 0x14 => // AMOMAX
+        case 0x14 =>   // AMOMAX
           mem(wordAddr) = math.max(oldValue, rs2Val); (oldValue, true)
-        case 0x18 => // AMOMINU
+        case 0x18 =>   // AMOMINU
           val a = oldValue.toLong & 0xffffffffL
-          val b = rs2Val.toLong & 0xffffffffL
+          val b = rs2Val.toLong   & 0xffffffffL
           mem(wordAddr) = (if (a < b) a else b).toInt
           (oldValue, true)
-        case 0x1c => // AMOMAXU
+        case 0x1c =>   // AMOMAXU
           val a = oldValue.toLong & 0xffffffffL
-          val b = rs2Val.toLong & 0xffffffffL
+          val b = rs2Val.toLong   & 0xffffffffL
           mem(wordAddr) = (if (a > b) a else b).toInt
           (oldValue, true)
         case _ =>
-          Console.err.println(
-            f"Unknown AMO funct5=0x$funct5%02x at pc=0x$pc%08x"
-          )
+          Console.err.println(f"Unknown AMO funct5=0x$funct5%02x at pc=0x$pc%08x")
           (0, false)
       }
     }
@@ -449,12 +378,10 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
     val pcNext = pc + 4
 
     val result = opcode match {
-      case 0x2f => // AMO
+      case 0x2f =>   // AMO
         val addr = rs1Val
         if (funct3 != 0x2) {
-          throw new RuntimeException(
-            f"Invalid funct3=0x$funct3%x for AMO at pc=0x$pc%08x"
-          )
+          throw new RuntimeException(f"Invalid funct3=0x$funct3%x for AMO at pc=0x$pc%08x")
         }
         val funct5 = (funct7 >> 2) & 0x1f
         val (value, success) = atomic(funct5, addr, rs2Val)
@@ -462,22 +389,19 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
 
       case AluImm => (alu(funct3, sraSub, rs1Val, imm), true, pcNext)
       case Alu if funct7 == 0x01 =>
-        (mulDiv(funct3, rs1Val, rs2Val), true, pcNext)
+                     (mulDiv(funct3, rs1Val, rs2Val), true, pcNext)
       case Alu    => (alu(funct3, sraSub, rs1Val, rs2Val), true, pcNext)
-      case Branch =>
-        (0, false, if (compare(funct3, rs1Val, rs2Val)) pc + imm else pcNext)
+      case Branch => (0, false, if (compare(funct3, rs1Val, rs2Val)) pc + imm else pcNext)
       case Load   => (load(funct3, rs1Val, imm), true, pcNext)
       case Store  => store(funct3, rs1Val, imm, rs2Val); (0, false, pcNext)
       case Lui    => (imm, true, pcNext)
       case AuiPc  => (pc + imm, true, pcNext)
       case Jal    => (pc + 4, true, pc + imm)
       case JalR   => (pc + 4, true, (rs1Val + imm) & 0xfffffffe)
-      case Fence  => (0, false, pcNext) // fence / fence.i: no-op
+      case Fence  => (0, false, pcNext)                      // fence / fence.i: no-op
       case System => systemOp()
       case _      =>
-        Console.err.println(
-          f"Unknown opcode 0x$opcode%02x at pc=0x$pc%08x instr=0x$instr%08x — treating as nop"
-        )
+        Console.err.println(f"Unknown opcode 0x$opcode%02x at pc=0x$pc%08x instr=0x$instr%08x — treating as nop")
         (0, false, pcNext)
     }
 
@@ -504,15 +428,11 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
       val instr = mem(memIdx(pc))
       cont = execute(instr)
       instCount += 1
-      steps += 1
+      steps     += 1
     } catch {
       case e: Throwable =>
-        Console.err.println(
-          f"\n*** SIM HALTED at pc=0x$pc%08x after $steps steps"
-        )
-        Console.err.println(
-          s"***   reason: ${e.getClass.getSimpleName}: ${e.getMessage}"
-        )
+        Console.err.println(f"\n*** SIM HALTED at pc=0x$pc%08x after $steps steps")
+        Console.err.println(s"***   reason: ${e.getClass.getSimpleName}: ${e.getMessage}")
         Console.err.println("***   registers:")
         for (i <- 0 until 32) {
           Console.err.print(f"x$i%02d=0x${reg(i)}%08x ")
@@ -530,9 +450,9 @@ object SimRV {
   // the `. = 0x80000000;` in boot.ld and the memory@80000000 node in wildcat.dts.
   val MEM_BASE = 0x80000000
 
-  val memSize = 8 // MB
+  val memSize  = 8                                  // MB
   val memWords = memSize * 1024 * 1024 / 4
-  val maxAddr = memSize * 1024 * 1024 - 1
+  val maxAddr  = memSize * 1024 * 1024 - 1
 
   def runSimRV(file: String) = {
     val mem = new Array[Int](memWords)
