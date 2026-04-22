@@ -114,7 +114,7 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
         case AuiPc  => U
         case Jal    => UJ
         case JalR   => I
-        case System => I
+        case System    => I
         case _      => R
       }
       val instr7     = (instr >> 7)  & 0x01
@@ -235,7 +235,11 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
         val offset = addr - 0x10000000
         funct3 match {
           case SB if offset == 0 =>
-            print((value & 0xff).toChar)
+            if (value == 0x0A || value == 0x0D) {
+              println()
+            } else {
+              print((value & 0xff).toChar)
+            }
             Console.out.flush()
           case _ =>
             // writes to IER/FCR/LCR/MCR/SCR — no-op
@@ -377,6 +381,13 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
     val rs2Val = reg(rs2)
     val pcNext = pc + 4
 
+    // Debug output for atomic instructions
+    if (opcode == 0x2f) {
+      //println(f"Atomic instruction at pc=0x${pc}%08x: rs1=x${rs1}%d(0x${rs1Val}%08x) rs2=x${rs2}%d(0x${rs2Val}%08x) rd=x${rd}%d funct7=0x${funct7}%02x")
+    }
+
+    // Execute the instruction and return a tuple for the result:
+    //   (ALU result, writeBack, next PC)
     val result = opcode match {
       case 0x2f =>   // AMO
         val addr = rs1Val
@@ -399,7 +410,7 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
       case Jal    => (pc + 4, true, pc + imm)
       case JalR   => (pc + 4, true, (rs1Val + imm) & 0xfffffffe)
       case Fence  => (0, false, pcNext)                      // fence / fence.i: no-op
-      case System => systemOp()
+      case System    => systemOp()
       case _      =>
         Console.err.println(f"Unknown opcode 0x$opcode%02x at pc=0x$pc%08x instr=0x$instr%08x — treating as nop")
         (0, false, pcNext)
