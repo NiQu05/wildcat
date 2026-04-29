@@ -4,6 +4,7 @@ import chisel3._
 import wildcat.Util
 
 import chisel.lib.uart._
+import chisel3.util.RegEnable
 
 /*
  * This file is part of the RISC-V processor Wildcat.
@@ -12,10 +13,8 @@ import chisel.lib.uart._
  *
  * Author: Martin Schoeberl (martin@jopdesign.com)
  *
- * Edited by Georg and Alexander to test our Bootloader
- *
  */
-class WildcatTop(file: String, dmemNrByte: Int = 4096) extends Module {
+class WildcatTop(file: String, dmemNrByte: Int = 4096, testFPGA: Boolean = true) extends Module {
 
   val io = IO(new Bundle {
     val led = Output(UInt(16.W))
@@ -29,11 +28,15 @@ class WildcatTop(file: String, dmemNrByte: Int = 4096) extends Module {
   val cpu = Module(new ThreeCats())
   // val cpu = Module(new WildFour())
   // val cpu = Module(new StandardFive())
-  val dmem = Module(new ScratchPadMem(memory, nrBytes = dmemNrByte))
-  cpu.io.dmem <> dmem.io
-  val imem = Module(new InstructionROM(memory))
-  cpu.io.imem <> imem.io
-
+  val dmem = if (testFPGA) Module(new ScratchPadMem(memory, nrBytes = dmemNrByte)) else Module(new OpenRAMMem())
+  cpu.io.dmem <> dmem.cpuPort
+  // gate memory access when not to data memory
+  when (cpu.io.dmem.address(31, 28) =/= 0.U) {
+    dmem.cpuPort.rd      := false.B
+    dmem.cpuPort.wr      := false.B
+  }
+  val imem = if (testFPGA) Module(new InstructionROM(memory)) else Module(new OpenRAMMem())
+  cpu.io.imem <> imem.cpuPort
 
   // Here IO stuff
   // IO is mapped ot 0xf000_0000
@@ -52,16 +55,15 @@ class WildcatTop(file: String, dmemNrByte: Int = 4096) extends Module {
 
   tx.io.channel.bits := cpu.io.dmem.wrData(7, 0)
   tx.io.channel.valid := false.B
-  rx.io.channel.ready := false.B
+  rx.io.channel.ready := cpu.io.dmem.rd && (cpu.io.dmem.address(31, 28) === 0xf.U && cpu.io.dmem.address(19,16) === 0.U && cpu.io.dmem.address(3, 0) === 4.U)
 
   val uartStatusReg = RegNext(rx.io.channel.valid ## tx.io.channel.ready)
-  val memAddressReg = RegNext(cpu.io.dmem.address)
+  val memAddressReg = RegEnable(cpu.io.dmem.address, 0.U, cpu.io.dmem.rd)
   when (memAddressReg(31, 28) === 0xf.U && memAddressReg(19,16) === 0.U) {
     when (memAddressReg(3, 0) === 0.U) {
       cpu.io.dmem.rdData := uartStatusReg
     } .elsewhen(memAddressReg(3, 0) === 4.U) {
       cpu.io.dmem.rdData := rx.io.channel.bits
-      rx.io.channel.ready := cpu.io.dmem.rd
     }
   }
 
@@ -73,12 +75,15 @@ class WildcatTop(file: String, dmemNrByte: Int = 4096) extends Module {
     } .elsewhen (cpu.io.dmem.address(19,16) === 1.U) {
       ledReg := cpu.io.dmem.wrData(7, 0)
     }
-    dmem.io.wr := false.B
   }
 
   io.led := 1.U ## 0.U(7.W) ## RegNext(ledReg)
 }
 
 object WildcatTop extends App {
-  emitVerilog(new WildcatTop(args(0)), Array("--target-dir", "generated"))
+  emitVerilog(new WildcatTop(args(0), testFPGA = true), Array("--target-dir", "generated"))
+}
+
+object WildcatTopAsic extends App {
+  emitVerilog(new WildcatTop(args(0), testFPGA = false), Array("--target-dir", "generated"))
 }
