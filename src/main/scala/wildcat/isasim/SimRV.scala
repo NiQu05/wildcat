@@ -266,12 +266,11 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
         val offset = addr - 0x10000000
         funct3 match {
           case SB if offset == 0 =>
-            if (value == 0x0a || value == 0x0d) {
-              println()
-            } else {
-              print((value & 0xff).toChar)
+            val b = value & 0xff
+            if (b != 0x0d) { // Check for \r
+              Console.out.write(b)
+              if (b == 0x0a) Console.out.flush()
             }
-            Console.out.flush()
           case _ =>
           // writes to IER/FCR/LCR/MCR/SCR — no-op
         }
@@ -575,7 +574,7 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
 object SimRV {
 
   // Physical base of RAM. Must match the kernel's CONFIG_PHYS_RAM_BASE and
-  // the `. = 0x80000000;` in boot.ld and the memory@80000000 node in wildcat.dts.
+  // the . = 0x80000000; in boot.ld and the memory@80000000 node in wildcat.dts.
   val MEM_BASE = 0x80000000
 
   val memSize = 32 // MB
