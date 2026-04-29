@@ -577,7 +577,7 @@ object SimRV {
   // the . = 0x80000000; in boot.ld and the memory@80000000 node in wildcat.dts.
   val MEM_BASE = 0x80000000
 
-  val memSize = 32 // MB
+  val memSize = 48 // MB
   val memWords = memSize * 1024 * 1024 / 4
   val maxAddr = memSize * 1024 * 1024 - 1
 
