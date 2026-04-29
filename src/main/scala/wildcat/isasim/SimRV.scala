@@ -269,7 +269,7 @@ class SimRV(mem: Array[Int], start: Int, stop: Int) {
             val b = value & 0xff
             if (b != 0x0d) { // Check for \r
               Console.out.write(b)
-              if (b == 0x0a) Console.out.flush()
+              Console.out.flush()
             }
           case _ =>
           // writes to IER/FCR/LCR/MCR/SCR — no-op
