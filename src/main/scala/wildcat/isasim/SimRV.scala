@@ -21,11 +21,15 @@ import wildcat.LoadStoreFunct3._
 import wildcat.CSRFunct3._
 import wildcat.InstrType._
 import wildcat.CSR._
+import wildcat.Compressed
 import wildcat.Util
+
 
 class SimRV(mem: Array[Int], start: Int, stop: Int, linux: Boolean = false) {
   import SimRV._
 
+  var compressedCount: Long = 0L
+  var compressedPrintCount: Long = 0L
   // That's the state of the processor.
   // That's it, nothing else (except memory ;-)
   var pc = start // RISC-V tests start at 0x200
@@ -68,7 +72,36 @@ class SimRV(mem: Array[Int], start: Int, stop: Int, linux: Boolean = false) {
     idx
   }
 
-  def execute(instr: Int): Boolean = {
+private def loadHalfword(addr: Int): Int = {
+  val word = mem(memIdx(addr & ~0x3))
+
+  if ((addr & 0x2) == 0)
+    word & 0xffff
+  else
+    (word >>> 16) & 0xffff
+}
+
+private def fetchInstruction(addr: Int): (Int, Int) = {
+
+  val low = loadHalfword(addr)
+
+  if (Compressed.isCompressed(low)) {
+
+    compressedCount += 1
+
+    val expanded = Compressed.expand(low)
+
+    (expanded, 2)
+
+  } else {
+
+    val high = loadHalfword(addr + 2)
+    (low | (high << 16), 4)
+
+  }
+}
+
+  def execute(instr: Int, instrLen: Int = 4): Boolean = {
     val oldPc = pc
 
     // Do some decoding: extraction of decoded fields
@@ -257,7 +290,7 @@ class SimRV(mem: Array[Int], start: Int, stop: Int, linux: Boolean = false) {
 
     // SYSTEM opcode: separate priv instructions (funct3=0) from CSR ops (funct3!=0)
     def systemOp(): (Int, Boolean, Int) = {
-      val pcNext = pc + 4
+      val pcNext = pc + instrLen
       if (funct3 == 0) {
         val f7 = (instr >>> 25) & 0x7f
         val imm12 = (instr >>> 20) & 0xfff
@@ -396,7 +429,7 @@ class SimRV(mem: Array[Int], start: Int, stop: Int, linux: Boolean = false) {
     val rs1Val = reg(rs1)
     val rs2Val = reg(rs2)
     // next pc
-    val pcNext = pc + 4
+    val pcNext = pc + instrLen
 
     // Debug output for atomic instructions
     if (opcode == 0x2f) {
@@ -425,8 +458,8 @@ class SimRV(mem: Array[Int], start: Int, stop: Int, linux: Boolean = false) {
         store(funct3, rs1Val, imm, rs2Val); (0, false, pcNext)
       case Lui => (imm, true, pcNext)
       case AuiPc => (pc + imm, true, pcNext)
-      case Jal => (pc + 4, true, pc + imm)
-      case JalR => (pc + 4, true, (rs1Val + imm) & 0xfffffffe)
+      case Jal => (pc + instrLen, true, pc + imm)
+      case JalR => (pc + instrLen, true, (rs1Val + imm) & 0xfffffffe)
       case Fence => (0, false, pcNext)
       case System => systemOp()
       case _ => throw new Exception("Opcode " + opcode + " at " + pc + " not (yet) implemented")
@@ -488,8 +521,8 @@ class SimRV(mem: Array[Int], start: Int, stop: Int, linux: Boolean = false) {
       case Some(c) => takeTrap(c, pc, 0) // tval = 0 for interrupts
       case None    =>
         try {
-          val instr = mem(memIdx(pc))
-          cont = execute(instr)
+          val (instr, instrLen) = fetchInstruction(pc)
+          cont = execute(instr, instrLen)
         } catch {
           case e: Throwable =>
             Console.err.println(
@@ -508,6 +541,7 @@ class SimRV(mem: Array[Int], start: Int, stop: Int, linux: Boolean = false) {
     }
   }
   Console.err.println(f"Simulation ended. pc=0x$pc%08x, steps=$instrCnt")
+  Console.err.println(s"Compressed instructions executed: $compressedCount")
 }
 
 object SimRV {

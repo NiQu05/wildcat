@@ -98,7 +98,7 @@ object CSR {
   val HARTID = 0xf10
   val MARCHID = 0xf12
   val WILDCAT_MARCHID = 47 // see https://github.com/riscv/riscv-isa-manual/blob/main/marchid.md
-  val WILDCAT_MISA = 0x40001100 // RV32IMA
+  val WILDCAT_MISA = 0x40001104 // RV32IMAC
 
   val MINSTRET = 0xb02
   val MINSTRETH = 0xb82
