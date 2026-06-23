@@ -54,6 +54,12 @@ class SimRV(mem: Array[Int], start: Int, stop: Int, linux: Boolean = false) {
   // some statistics
   var instrCnt: Long = 0L
 
+  // Profiling
+  val prof = Profiler.load("vmlinux.sym")
+  val memcpyEntries = prof.entryAddrs(Set("memcpy", "__memcpy"))
+  val memsetEntries = prof.entryAddrs(Set("memset", "__memset"))
+  val inflateEntries = prof.entryAddrs(Set("inflate_fast"))
+
   // Memory-mapped UART + CLINT, only active in Linux mode.
   private val mmio = new Mmio(linux)
 
@@ -210,7 +216,7 @@ class SimRV(mem: Array[Int], start: Int, stop: Int, linux: Boolean = false) {
 
       // Memory-mapped IO (UART + CLINT)
       if (mmio.isMmio(addr)) {
-        mmio.store(funct3, addr, value)
+        mmio.store(funct3, addr, value, instrCnt)
         return
       }
 
@@ -482,6 +488,12 @@ class SimRV(mem: Array[Int], start: Int, stop: Int, linux: Boolean = false) {
       case None    =>
         try {
           val instr = mem(memIdx(pc))
+
+          prof.sample(pc)
+          if (memcpyEntries.contains(pc)) prof.recordCall("memcpy", reg(1))  // reg(1) = ra
+          if (memsetEntries.contains(pc)) prof.recordCall("memset", reg(1))
+          if (inflateEntries.contains(pc)) prof.recordCall("inflate_fast", reg(1))
+
           cont = execute(instr)
         } catch {
           case e: Throwable =>
@@ -499,8 +511,13 @@ class SimRV(mem: Array[Int], start: Int, stop: Int, linux: Boolean = false) {
             cont = false
         }
     }
+    // Stop profiling once Linux has finished booting (login prompt seen on the UART)
+    // if (mmio.bootCompleted) cont = false
   }
   Console.err.println(f"Simulation ended. pc=0x$pc%08x, steps=$instrCnt")
+
+  // Profiling report
+  prof.report(5)
 }
 
 object SimRV {

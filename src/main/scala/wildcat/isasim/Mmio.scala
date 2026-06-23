@@ -26,13 +26,21 @@ trait MmioDevice {
 
   // offset is address relative to base; mtime is the current machine time
   def load(offset: Int, mtime: Long): Int
-  def store(funct3: Int, offset: Int, value: Int): Unit
+  def store(funct3: Int, offset: Int, value: Int, mtime: Long): Unit
 }
 
 // UART 16550 compatible
 class Uart extends MmioDevice {
   val base = UART_BASE
   val size = UART_SIZE
+
+  // Instruction count to boot by looking for boot banner in the console output
+  private val bootBanner = "wildcat login:"
+  private val tail = new StringBuilder // rolling window, bounded to bootBanner.length
+  private var bootReported = false
+
+  // True once the boot banner has been seen on the console
+  def bootCompleted: Boolean = bootReported
 
   // A thread that pushes stdin bytes into a queue
   private val rxQueue = new ConcurrentLinkedQueue[Integer]()
@@ -53,13 +61,24 @@ class Uart extends MmioDevice {
     case _ => 0x00
   }
 
-  def store(funct3: Int, offset: Int, value: Int): Unit = funct3 match {
+  def store(funct3: Int, offset: Int, value: Int, mtime: Long): Unit = funct3 match {
     // Only a byte store to THR (offset 0) prints; other regs are no-ops
     case SB if offset == 0 =>
       val b = value & 0xff
       if (b != 0x0d) {  // drop \r
         Console.out.write(b)
         Console.out.flush()
+        
+        // Look for the boot banner in the console output and report when it is reached
+        if (!bootReported) {
+          tail.append(b.toChar)
+          if (tail.length > bootBanner.length) tail.delete(0, tail.length - bootBanner.length)
+          if (tail.toString == bootBanner) {
+            Console.err.println(f"\n\rReached '$bootBanner' after $mtime instructions")
+            Console.err.flush()
+            bootReported = true
+          }
+        }
       }
     case _ =>
   }
@@ -84,7 +103,7 @@ class Clint extends MmioDevice {
     case _ => 0
   }
 
-  def store(funct3: Int, offset: Int, value: Int): Unit = offset match {
+  def store(funct3: Int, offset: Int, value: Int, mtime: Long): Unit = offset match {
     case 0x4000 => mtimecmp = (mtimecmp & 0xffffffff00000000L) | (value.toLong & 0xffffffffL)
     case 0x4004 => mtimecmp = (mtimecmp & 0x00000000ffffffffL) | ((value.toLong & 0xffffffffL) << 32)
     case _ =>
@@ -112,10 +131,12 @@ class Mmio(enabled: Boolean) {
     if (d == null) 0 else d.load(addr - d.base, mtime)
   }
 
-  def store(funct3: Int, addr: Int, value: Int): Unit = {
+  def store(funct3: Int, addr: Int, value: Int, mtime: Long): Unit = {
     val d = deviceAt(addr)
-    if (d != null) d.store(funct3, addr - d.base, value)
+    if (d != null) d.store(funct3, addr - d.base, value, mtime)
   }
 
   def timerPending(mtime: Long): Boolean = enabled && clint.timerPending(mtime)
+
+  def bootCompleted: Boolean = enabled && uart.bootCompleted
 }
