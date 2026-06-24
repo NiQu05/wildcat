@@ -122,7 +122,7 @@ object CSR {
 object MMIO {
   // MMIO memory map (base + size) - Should match Linux DTS address ranges
   val UART_BASE = 0x10000000
-  val UART_SIZE = 0x100
+  val UART_SIZE = 0x8
   val CLINT_BASE = 0x02000000
   val CLINT_SIZE = 0x10000
 }
